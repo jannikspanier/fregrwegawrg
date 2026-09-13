@@ -98,7 +98,7 @@ runuser -u gameserver -- env HOME=/opt/gameserver /opt/steamcmd/steamcmd.sh \
   +login anonymous \
   +app_update 4020 validate \
   +quit
-test -x /opt/gameserver/srcds_run || { echo "SteamCMD hat App 4020 nicht vollst�ndig installiert: /opt/gameserver/srcds_run fehlt." >&2; exit 1; }
+test -x /opt/gameserver/srcds_run || { echo "SteamCMD hat App 4020 nicht vollst ndig installiert: /opt/gameserver/srcds_run fehlt." >&2; exit 1; }
 mkdir -p /opt/gameserver/.steam/sdk32
 cp /opt/steamcmd/linux32/steamclient.so /opt/gameserver/.steam/sdk32/steamclient.so
 rm -rf /opt/steamcmd
