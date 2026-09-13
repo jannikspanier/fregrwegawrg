@@ -100,32 +100,13 @@ run_palworld_steamcmd() {
   runuser -u gameserver -- env HOME=/tmp/steam-home /tmp/steamcmd/steamcmd.sh "$@"
 }
 
-# Steam liefert fuer App 2394010 gelegentlich kurzfristig "Missing configuration".
-# Die Wiederholungen existieren nur waehrend des Template-Builds und landen nicht
-# als Hintergrundlogik im fertigen Kundencontainer.
-if ! run_palworld_steamcmd \
-    +force_install_dir /opt/gameserver \
-    +login anonymous \
-    +app_update 2394010 validate \
-    +quit || [ ! -x /opt/gameserver/PalServer.sh ]; then
-  sleep 5
-  if ! run_palworld_steamcmd \
-      +@sSteamCmdForcePlatformType linux \
-      +force_install_dir /opt/gameserver \
-      +login anonymous \
-      +app_info_update 1 \
-      +app_update 2394010 validate \
-      +quit || [ ! -x /opt/gameserver/PalServer.sh ]; then
-    sleep 10
-    run_palworld_steamcmd \
-      +@sSteamCmdForcePlatformType linux \
-      +force_install_dir /opt/gameserver \
-      +login anonymous \
-      +app_info_update 1 \
-      +app_update 2394010 -beta public validate \
-      +quit
-  fi
-fi
+run_palworld_steamcmd \
+  +@sSteamCmdForcePlatformType linux \
+  +force_install_dir /opt/gameserver \
+  +login anonymous \
+  +app_info_update 1 \
+  +app_update 2394010 -beta public validate \
+  +quit
 
 test -x /opt/gameserver/PalServer.sh || { echo "SteamCMD hat App 2394010 nicht vollstaendig installiert: /opt/gameserver/PalServer.sh fehlt." >&2; exit 1; }
 mkdir -p /opt/gameserver/.steam/sdk64
