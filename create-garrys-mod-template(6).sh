@@ -115,9 +115,13 @@ cat > /usr/local/bin/apexium-start-game <<'EOF'
 cd /opt/gameserver
 F=/run/apexium-gameserver/console
 rm -f "$F"; mkfifo -m 600 "$F"; exec 3<>"$F"
-A=(-game garrysmod -console +port "$GAME_PORT" +maxplayers "$MAX_PLAYERS" +map "${GMOD_MAP:-gm_construct}" +hostname "$SERVER_NAME")
+LOG=/opt/gameserver/garrysmod/console.log
+mkdir -p "$(dirname "$LOG")"
+: > "$LOG"
+tail -n0 -F "$LOG" &
+A=(-game garrysmod -console -condebug -conclearlog +port "$GAME_PORT" +maxplayers "$MAX_PLAYERS" +map "${GMOD_MAP:-gm_construct}" +hostname "$SERVER_NAME")
 if [ -n "${STEAM_GSLT:-}" ]; then A+=(+sv_setsteamaccount "$STEAM_GSLT"); fi
-exec ./srcds_run "${A[@]}" <&3
+exec ./srcds_run "${A[@]}" <&3 >/dev/null
 EOF
 
 chmod 0755 /usr/local/bin/apexium-start-game
