@@ -94,23 +94,18 @@ EOF
 curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C /opt/steamcmd
 chown -R gameserver:gameserver /opt/gameserver /opt/steamcmd
 runuser -u gameserver -- env HOME=/opt/gameserver /opt/steamcmd/steamcmd.sh \
-  +@sSteamCmdForcePlatformType linux \
   +force_install_dir /opt/gameserver \
   +login anonymous \
-  +app_info_update 1 \
-  +app_update 4020 -beta x86-64 validate \
+  +app_update 4020 validate \
   +quit
 
-test -x /opt/gameserver/srcds_run_x64 || {
-  echo "SteamCMD hat den Garry's-Mod-x86-64-Server nicht vollständig installiert: /opt/gameserver/srcds_run_x64 fehlt." >&2
+test -x /opt/gameserver/srcds_run || {
+  echo "SteamCMD hat App 4020 nicht vollständig installiert: /opt/gameserver/srcds_run fehlt." >&2
   exit 1
 }
 
-mkdir -p /opt/gameserver/.steam/sdk32 /opt/gameserver/.steam/sdk64
+mkdir -p /opt/gameserver/.steam/sdk32
 cp /opt/steamcmd/linux32/steamclient.so /opt/gameserver/.steam/sdk32/steamclient.so
-if [ -f /opt/steamcmd/linux64/steamclient.so ]; then
-  cp /opt/steamcmd/linux64/steamclient.so /opt/gameserver/.steam/sdk64/steamclient.so
-fi
 rm -rf /opt/steamcmd
 chown -R gameserver:gameserver /opt/gameserver
 cat > /usr/local/bin/apexium-console-command <<'EOF'
@@ -131,7 +126,7 @@ mkdir -p "$(dirname "$LOG")"
 tail -n0 -F "$LOG" &
 A=(-game garrysmod -console -condebug -conclearlog +port "$GAME_PORT" +maxplayers "$MAX_PLAYERS" +map "${GMOD_MAP:-gm_construct}" +hostname "$SERVER_NAME")
 if [ -n "${STEAM_GSLT:-}" ]; then A+=(+sv_setsteamaccount "$STEAM_GSLT"); fi
-exec ./srcds_run_x64 "${A[@]}" <&3 >/dev/null
+exec ./srcds_run "${A[@]}" <&3 >/dev/null
 EOF
 
 chmod 0755 /usr/local/bin/apexium-start-game
