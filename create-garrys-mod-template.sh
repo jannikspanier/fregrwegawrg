@@ -10,7 +10,7 @@ BASE_TEMPLATE="${STORAGE}:vztmpl/apexium-debian-12-minbase.tar.zst"
 CORES=2
 MEMORY=4096
 SWAP=0
-ROOTFS_SIZE=30
+ROOTFS_SIZE=15
 
 PREP_IP="10.77.250.27/16"
 PREP_GW="10.77.0.1"
@@ -81,6 +81,13 @@ EOF
 systemctl disable ssh.service
 systemctl enable ssh.socket
 
+# Keine virtuelle Login-Konsole im Kunden-LXC. pct enter/SFTP funktionieren
+# weiterhin; dadurch startet kein unnoetiger agetty-Prozess.
+systemctl mask getty@.service serial-getty@.service console-getty.service container-getty@.service 2>/dev/null || true
+
+# LXC teilt die Host-Uhr; ein eigener NTP-Dienst im Container ist unnoetig.
+systemctl mask systemd-timesyncd.service 2>/dev/null || true
+
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/90-apexium.conf <<'EOF'
 [Journal]
@@ -89,6 +96,10 @@ RuntimeMaxUse=16M
 RuntimeMaxFileSize=4M
 RateLimitIntervalSec=30s
 RateLimitBurst=2000
+ForwardToSyslog=no
+ForwardToKMsg=no
+ForwardToConsole=no
+ForwardToWall=no
 EOF
 
 curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C /opt/steamcmd
@@ -107,8 +118,8 @@ test -x /opt/gameserver/srcds_run_x64 || {
   exit 1
 }
 
-mkdir -p /opt/gameserver/.steam/sdk32
-cp /opt/steamcmd/linux32/steamclient.so /opt/gameserver/.steam/sdk32/steamclient.so
+mkdir -p /opt/gameserver/.steam/sdk64
+cp /opt/steamcmd/linux64/steamclient.so /opt/gameserver/.steam/sdk64/steamclient.so
 rm -rf /opt/steamcmd
 chown -R gameserver:gameserver /opt/gameserver
 cat > /usr/local/bin/apexium-console-command <<'EOF'
@@ -155,7 +166,10 @@ WantedBy=multi-user.target
 EOF
 
 
-apt-get purge -y --autoremove curl
+# Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
+find /opt/gameserver -type f -iname '*.pdb' -delete
+
+apt-get purge -y --autoremove curl lib32gcc-s1 lib32stdc++6
 
 # Nur der SSH-Server und ssh-keygen bleiben; Client-Werkzeuge werden nicht gebraucht.
 rm -f \
