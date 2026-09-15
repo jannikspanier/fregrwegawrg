@@ -58,7 +58,7 @@ chown root:root /opt
 
 chmod 0755 /opt
 
-mkdir -p /opt/gameserver/data /opt/steamcmd /opt/gameserver/.steam
+mkdir -p /opt/gameserver/data /opt/steamcmd /tmp/steam-home /opt/gameserver/.steam
 
 chmod 0750 /opt/gameserver
 
@@ -103,11 +103,11 @@ ForwardToWall=no
 EOF
 
 curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C /opt/steamcmd
-chown -R gameserver:gameserver /opt/gameserver /opt/steamcmd
+chown -R gameserver:gameserver /opt/gameserver /opt/steamcmd /tmp/steam-home
 # Der Public-Branch von App 4020 liefert aktuell ueber SteamCMD wiederholt
 # "Missing configuration". Fuer Linux verwenden wir deshalb den offiziellen
 # x86-64-Branch von Garry's Mod, der weiterhin fuer Dedicated Server angeboten wird.
-runuser -u gameserver -- env HOME=/opt/gameserver /opt/steamcmd/steamcmd.sh \
+runuser -u gameserver -- env HOME=/tmp/steam-home /opt/steamcmd/steamcmd.sh \
   +force_install_dir /opt/gameserver \
   +login anonymous \
   +app_update 4020 -beta x86-64 validate \
@@ -120,7 +120,7 @@ test -x /opt/gameserver/srcds_run_x64 || {
 
 mkdir -p /opt/gameserver/.steam/sdk64
 cp /opt/steamcmd/linux64/steamclient.so /opt/gameserver/.steam/sdk64/steamclient.so
-rm -rf /opt/steamcmd
+rm -rf /opt/steamcmd /tmp/steam-home
 chown -R gameserver:gameserver /opt/gameserver
 cat > /usr/local/bin/apexium-console-command <<'EOF'
 #!/usr/bin/env bash
