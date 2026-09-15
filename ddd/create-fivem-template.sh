@@ -72,6 +72,7 @@ Match User gameserver
     ChrootDirectory /opt
     ForceCommand internal-sftp -d /gameserver
     DisableForwarding yes
+Match all
 EOF
 mkdir -p /etc/systemd/system/ssh.service.d
 cat > /etc/systemd/system/ssh.service.d/hostkeys.conf <<'EOF'
@@ -129,7 +130,7 @@ cat > /usr/local/bin/apexium-start-game <<'EOF'
 #!/usr/bin/env bash
 cd /opt/gameserver
 if [ -z "${FIVEM_LICENSE_KEY:-}" ]; then
-  echo "FiveM wartet auf einen Cfx.re-Lizenzschlüssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
+  echo "FiveM wartet auf einen Cfx.re-LizenzschlÃ¼ssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
   exit 0
 fi
 cat > data/apexium.cfg <<CFG
