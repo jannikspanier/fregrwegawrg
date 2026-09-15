@@ -235,9 +235,9 @@ if [ ! -f "$CFG" ]; then
   "IdleDayCycleSpeed": 0.0,
   "IdleTargetFramerate": 5,
   "ActiveTargetFramerate": 60,
-  "LogFilesEnabled": true,
-  "TimestampLogFilenames": true,
-  "TimestampLogEntries": true,
+  "LogFilesEnabled": false,
+  "TimestampLogFilenames": false,
+  "TimestampLogEntries": false,
   "SkipNetworkAccessibilityTest": true
 }
 CFGJSON
