@@ -72,6 +72,7 @@ Match User gameserver
     ChrootDirectory /opt
     ForceCommand internal-sftp -d /gameserver
     DisableForwarding yes
+Match all
 EOF
 mkdir -p /etc/systemd/system/ssh.service.d
 cat > /etc/systemd/system/ssh.service.d/hostkeys.conf <<'EOF'
