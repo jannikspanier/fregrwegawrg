@@ -10,7 +10,7 @@ BASE_TEMPLATE="${STORAGE}:vztmpl/apexium-debian-12-minbase.tar.zst"
 CORES=3
 MEMORY=6144
 SWAP=0
-ROOTFS_SIZE=50
+ROOTFS_SIZE=8
 
 PREP_IP="10.77.250.30/16"
 PREP_GW="10.77.0.1"
@@ -37,8 +37,6 @@ set -Eeuo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export LC_ALL=C
 
-dpkg --add-architecture i386
-
 apt-get -o Acquire::Languages=none update
 
 apt-get install -y --no-install-recommends \
@@ -47,9 +45,7 @@ apt-get install -y --no-install-recommends \
   openssh-server \
   lib32gcc-s1 \
   lib32stdc++6 \
-  wine \
   wine64 \
-  wine32:i386 \
   xvfb \
   xauth
 
@@ -92,6 +88,13 @@ EOF
 systemctl disable ssh.service
 systemctl enable ssh.socket
 
+# Keine virtuelle Login-Konsole im Kunden-LXC. pct enter/SFTP funktionieren
+# weiterhin; dadurch startet kein unnoetiger agetty-Prozess.
+systemctl mask getty@.service serial-getty@.service console-getty.service container-getty@.service 2>/dev/null || true
+
+# LXC teilt die Host-Uhr; ein eigener NTP-Dienst im Container ist unnoetig.
+systemctl mask systemd-timesyncd.service 2>/dev/null || true
+
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/90-apexium.conf <<'EOF'
 [Journal]
@@ -100,6 +103,10 @@ RuntimeMaxUse=16M
 RuntimeMaxFileSize=4M
 RateLimitIntervalSec=30s
 RateLimitBurst=2000
+ForwardToSyslog=no
+ForwardToKMsg=no
+ForwardToConsole=no
+ForwardToWall=no
 EOF
 
 curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C /tmp/steamcmd
@@ -114,7 +121,7 @@ runuser -u gameserver -- env HOME=/tmp/steam-home /tmp/steamcmd/steamcmd.sh \
 
 test -f /opt/gameserver/TheForestDedicatedServer.exe || { echo "SteamCMD hat App 556450 nicht vollstaendig installiert: /opt/gameserver/TheForestDedicatedServer.exe fehlt." >&2; exit 1; }
 
-runuser -u gameserver -- env HOME=/opt/gameserver WINEPREFIX=/opt/gameserver/data/wine WINEARCH=win64 xvfb-run -a wineboot -u
+runuser -u gameserver -- env HOME=/opt/gameserver WINEPREFIX=/opt/gameserver/data/wine WINEARCH=win64 xvfb-run -a /usr/lib/wine/wine64 wineboot
 
 mkdir -p /usr/local/lib/apexium
 cat > /usr/local/lib/apexium/the-forest-console-filter.awk <<'AWK'
@@ -204,7 +211,7 @@ set_property saveFolderPath ""
 set_property targetFpsIdle 5
 set_property targetFpsActive 60
 export WINEPREFIX=/opt/gameserver/data/wine WINEARCH=win64
-exec xvfb-run --auto-servernum --server-args="-screen 0 640x480x24:32" /usr/bin/wine TheForestDedicatedServer.exe -batchmode -nographics -nosteamclient -configfilepath /opt/gameserver/data/the-forest-server.cfg > >(awk -f /usr/local/lib/apexium/the-forest-console-filter.awk) 2>&1
+exec xvfb-run --auto-servernum --server-args="-screen 0 640x480x24:32" /usr/lib/wine/wine64 TheForestDedicatedServer.exe -batchmode -nographics -nosteamclient -configfilepath /opt/gameserver/data/the-forest-server.cfg > >(awk -f /usr/local/lib/apexium/the-forest-console-filter.awk) 2>&1
 EOF
 
 chmod 0755 /usr/local/bin/apexium-start-game
@@ -226,6 +233,9 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
+
+# Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
+find /opt/gameserver -type f -iname '*.pdb' -delete
 
 apt-get purge -y --autoremove curl lib32gcc-s1 lib32stdc++6
 
