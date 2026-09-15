@@ -10,7 +10,7 @@ BASE_TEMPLATE="${STORAGE}:vztmpl/apexium-debian-12-minbase.tar.zst"
 CORES=3
 MEMORY=6144
 SWAP=0
-ROOTFS_SIZE=10
+ROOTFS_SIZE=50
 
 PREP_IP="10.77.250.22/16"
 PREP_GW="10.77.0.1"
@@ -81,13 +81,6 @@ EOF
 systemctl disable ssh.service
 systemctl enable ssh.socket
 
-# Keine virtuelle Login-Konsole im Kunden-LXC. pct enter/SFTP funktionieren
-# weiterhin; dadurch startet kein unnoetiger agetty-Prozess.
-systemctl mask getty@.service serial-getty@.service console-getty.service container-getty@.service 2>/dev/null || true
-
-# LXC teilt die Host-Uhr; ein eigener NTP-Dienst im Container ist unnoetig.
-systemctl mask systemd-timesyncd.service 2>/dev/null || true
-
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/90-apexium.conf <<'EOF'
 [Journal]
@@ -96,10 +89,6 @@ RuntimeMaxUse=16M
 RuntimeMaxFileSize=4M
 RateLimitIntervalSec=30s
 RateLimitBurst=2000
-ForwardToSyslog=no
-ForwardToKMsg=no
-ForwardToConsole=no
-ForwardToWall=no
 EOF
 
 FIVEM_ARTIFACT_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/35245-6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/fx.tar.xz"
@@ -128,24 +117,22 @@ chmod 0755 /usr/local/bin/apexium-console-command
 cat > /usr/local/bin/apexium-start-game <<'EOF'
 #!/usr/bin/env bash
 cd /opt/gameserver
-if [ -z "${FIVEM_LICENSE_KEY:-}" ]; then
-  echo "FiveM wartet auf einen Cfx.re-Lizenzschlüssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
-  exit 0
-fi
+if [ -z "${FIVEM_LICENSE_KEY:-}" ]; then exit 0; fi
 cat > data/apexium.cfg <<CFG
 endpoint_add_tcp "0.0.0.0:${GAME_PORT}"
 endpoint_add_udp "0.0.0.0:${GAME_PORT}"
 sv_hostname "$SERVER_NAME"
-sets sv_projectName "$SERVER_NAME"
-sets sv_projectDesc "Hosted by Apexium Hosting"
 sv_maxclients $MAX_PLAYERS
 sv_licenseKey "${FIVEM_LICENSE_KEY}"
 CFG
 if [ ! -f data/server.cfg ]; then
 cat > data/server.cfg <<'CFG'
 ensure mapmanager
+ensure chat
 ensure spawnmanager
-ensure basic-gamemode
+ensure sessionmanager
+ensure hardcap
+ensure rconlog
 CFG
 fi
 F=/run/apexium-gameserver/console
@@ -159,8 +146,6 @@ cat > /etc/systemd/system/apexium-gameserver.service <<'EOF'
 [Service]
 User=gameserver
 EnvironmentFile=/etc/apexium-gameserver.env
-StandardOutput=journal
-StandardError=journal
 RuntimeDirectory=apexium-gameserver
 ExecStart=/usr/local/bin/apexium-start-game
 KillSignal=SIGINT
@@ -173,9 +158,7 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
-
-# Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
-find /opt/gameserver -type f -iname '*.pdb' -delete
+systemctl enable apexium-gameserver.service
 
 apt-get purge -y --autoremove curl xz-utils
 
@@ -227,7 +210,7 @@ rm -f \
   /etc/logrotate.d/alternatives \
   /usr/libexec/dpkg/dpkg-db-backup
 
-# Debconf und Archiv-Keyrings werden nach dem Build nicht mehr ben tigt.
+# Debconf und Archiv-Keyrings werden nach dem Build nicht mehr benötigt.
 rm -f /usr/bin/debconf* /usr/sbin/dpkg-reconfigure /etc/debconf.conf
 rm -rf /usr/share/perl5/Debconf /usr/share/keyrings
 
