@@ -10,7 +10,7 @@ BASE_TEMPLATE="${STORAGE}:vztmpl/apexium-debian-12-minbase.tar.zst"
 CORES=4
 MEMORY=10240
 SWAP=0
-ROOTFS_SIZE=80
+ROOTFS_SIZE=40
 
 PREP_IP="10.77.250.24/16"
 PREP_GW="10.77.0.1"
@@ -82,6 +82,13 @@ EOF
 systemctl disable ssh.service
 systemctl enable ssh.socket
 
+# Keine virtuelle Login-Konsole im Kunden-LXC. pct enter/SFTP funktionieren
+# weiterhin; dadurch startet kein unnoetiger agetty-Prozess.
+systemctl mask getty@.service serial-getty@.service console-getty.service container-getty@.service 2>/dev/null || true
+
+# LXC teilt die Host-Uhr; ein eigener NTP-Dienst im Container ist unnoetig.
+systemctl mask systemd-timesyncd.service 2>/dev/null || true
+
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/90-apexium.conf <<'EOF'
 [Journal]
@@ -90,6 +97,10 @@ RuntimeMaxUse=16M
 RuntimeMaxFileSize=4M
 RateLimitIntervalSec=30s
 RateLimitBurst=2000
+ForwardToSyslog=no
+ForwardToKMsg=no
+ForwardToConsole=no
+ForwardToWall=no
 EOF
 
 curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C /tmp/steamcmd
@@ -125,6 +136,10 @@ if ! run_ark_steamcmd \
   fi
 fi
 test -x /opt/gameserver/ShooterGame/Binaries/Linux/ShooterGameServer || { echo "SteamCMD hat App 376030 nicht vollst ndig installiert: /opt/gameserver/ShooterGame/Binaries/Linux/ShooterGameServer fehlt." >&2; exit 1; }
+
+# Der Linux-Server benoetigt keine mitgelieferten Win32/Win64-Binaerbaeume.
+# Das spart insbesondere die grossen Windows-PDBs/Binaries im Master-Template.
+find /opt/gameserver/ShooterGame/Binaries /opt/gameserver/Engine/Binaries   -type d \( -name Win32 -o -name Win64 \) -prune -exec rm -rf {} + 2>/dev/null || true
 mkdir -p /opt/gameserver/.steam/sdk64
 cp /tmp/steamcmd/linux64/steamclient.so /opt/gameserver/.steam/sdk64/steamclient.so
 chown -R gameserver:gameserver /opt/gameserver
@@ -205,6 +220,9 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
+
+# Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
+find /opt/gameserver -type f -iname '*.pdb' -delete
 
 apt-get purge -y --autoremove curl lib32gcc-s1 lib32stdc++6
 
