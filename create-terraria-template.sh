@@ -10,7 +10,7 @@ BASE_TEMPLATE="${STORAGE}:vztmpl/apexium-debian-12-minbase.tar.zst"
 CORES=2
 MEMORY=4096
 SWAP=0
-ROOTFS_SIZE=30
+ROOTFS_SIZE=8
 
 PREP_IP="10.77.250.25/16"
 PREP_GW="10.77.0.1"
@@ -82,6 +82,13 @@ EOF
 systemctl disable ssh.service
 systemctl enable ssh.socket
 
+# Keine virtuelle Login-Konsole im Kunden-LXC. pct enter/SFTP funktionieren
+# weiterhin; dadurch startet kein unnoetiger agetty-Prozess.
+systemctl mask getty@.service serial-getty@.service console-getty.service container-getty@.service 2>/dev/null || true
+
+# LXC teilt die Host-Uhr; ein eigener NTP-Dienst im Container ist unnoetig.
+systemctl mask systemd-timesyncd.service 2>/dev/null || true
+
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/90-apexium.conf <<'EOF'
 [Journal]
@@ -90,6 +97,10 @@ RuntimeMaxUse=16M
 RuntimeMaxFileSize=4M
 RateLimitIntervalSec=30s
 RateLimitBurst=2000
+ForwardToSyslog=no
+ForwardToKMsg=no
+ForwardToConsole=no
+ForwardToWall=no
 EOF
 
 TERRARIA_VERSION_CODE="1456"
@@ -206,6 +217,9 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 EOF
 
+
+# Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
+find /opt/gameserver -type f -iname '*.pdb' -delete
 
 apt-get purge -y --autoremove curl unzip
 
