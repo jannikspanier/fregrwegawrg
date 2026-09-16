@@ -104,10 +104,11 @@ ForwardToConsole=no
 ForwardToWall=no
 EOF
 
-TERRARIA_VERSION_CODE="1456"
+TERRARIA_SERVER_ARCHIVE="$(curl -fsSL https://terraria.org/api/get/dedicated-servers-names | grep -oE 'terraria-server-[0-9]+[.]zip' | head -n1)"
+[ -n "$TERRARIA_SERVER_ARCHIVE" ] || { echo "Aktuelle Terraria-Serverversion konnte nicht ermittelt werden." >&2; exit 1; }
 
 curl -fL \
-  "https://terraria.org/api/download/pc-dedicated-server/terraria-server-${TERRARIA_VERSION_CODE}.zip" \
+  "https://terraria.org/api/download/pc-dedicated-server/${TERRARIA_SERVER_ARCHIVE}" \
   -o /tmp/terraria-server.zip
 
 unzip -q \
@@ -222,7 +223,7 @@ EOF
 # Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
 find /opt/gameserver -type f -iname '*.pdb' -delete
 
-apt-get purge -y --autoremove curl unzip
+# Update-Abhaengigkeiten bleiben fuer Versionswechsel und Neuinstallationen im Kundencontainer erhalten.
 
 # Nur der SSH-Server und ssh-keygen bleiben; Client-Werkzeuge werden nicht gebraucht.
 rm -f \
@@ -279,6 +280,37 @@ rm -rf /usr/share/perl5/Debconf /usr/share/keyrings
 # Kein interaktiver Login/MOTD in den Kunden-Appliances.
 rm -rf /etc/update-motd.d
 rm -f /etc/motd /etc/issue /etc/issue.net
+cat > /usr/local/bin/apexium-install-version <<'APEXIUM_VERSION_INSTALLER_EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+VERSION="${1:-latest}"
+WIPE="${2:-0}"
+ROOT=/opt/gameserver
+if [ "$WIPE" = "1" ]; then
+    find "$ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+fi
+mkdir -p "$ROOT"
+
+if [ "$VERSION" = "latest" ]; then
+    SERVER_ARCHIVE="$(curl -fsSL https://terraria.org/api/get/dedicated-servers-names | grep -oE 'terraria-server-[0-9]+[.]zip' | head -n1)"
+    [ -n "$SERVER_ARCHIVE" ] || { echo "Aktuelle Terraria-Serverversion konnte nicht ermittelt werden" >&2; exit 2; }
+    CODE="$(printf '%s' "$SERVER_ARCHIVE" | grep -oE '[0-9]+' | head -n1)"
+    RESOLVED="$CODE"
+else
+    printf '%s' "$VERSION" | grep -Eq '^[0-9]+([.][0-9]+){2,3}$|^[0-9]{4,6}$' || { echo "Ungültige Terraria-Version" >&2; exit 2; }
+    CODE="$(printf '%s' "$VERSION" | tr -d '.')"; RESOLVED="$VERSION"
+fi
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+curl -fL "https://terraria.org/api/download/pc-dedicated-server/terraria-server-${CODE}.zip" -o "$TMP/server.zip"
+unzip -q "$TMP/server.zip" -d "$TMP/server"
+BIN="$(find "$TMP/server" -type f -name TerrariaServer.bin.x86_64 -print -quit)"
+[ -n "$BIN" ] || { echo "Terraria-Binary fehlt" >&2; exit 2; }
+cp -a "$(dirname "$BIN")/." "$ROOT/"; chmod 0755 "$ROOT/TerrariaServer.bin.x86_64"
+printf '%s\n' "$RESOLVED" > /etc/apexium-gameserver-version; chown -R gameserver:gameserver "$ROOT"
+APEXIUM_VERSION_INSTALLER_EOF
+chmod 0755 /usr/local/bin/apexium-install-version
+printf '%s\n' 'template' > /etc/apexium-gameserver-version
+
 rm -f /etc/apexium-gameserver.env
 rm -rf /root
 mkdir -m 0700 /root
