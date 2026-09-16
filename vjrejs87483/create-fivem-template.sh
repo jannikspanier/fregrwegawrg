@@ -104,7 +104,7 @@ ForwardToWall=no
 EOF
 
 FIVEM_ARTIFACT_BASE="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master"
-FIVEM_ARTIFACT_SLUG="$(curl -fsSL "$FIVEM_ARTIFACT_BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | head -n1)"
+FIVEM_ARTIFACT_SLUG="$(curl -fsSL "$FIVEM_ARTIFACT_BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | sed -n '1p')"
 [ -n "$FIVEM_ARTIFACT_SLUG" ] || { echo "Aktuelles FiveM-Artifact konnte nicht ermittelt werden." >&2; exit 1; }
 FIVEM_ARTIFACT_URL="${FIVEM_ARTIFACT_BASE}/${FIVEM_ARTIFACT_SLUG}/fx.tar.xz"
 
@@ -133,7 +133,7 @@ cat > /usr/local/bin/apexium-start-game <<'EOF'
 #!/usr/bin/env bash
 cd /opt/gameserver
 if [ -z "${FIVEM_LICENSE_KEY:-}" ]; then
-  echo "FiveM wartet auf einen Cfx.re-Lizenzschl ssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
+  echo "FiveM wartet auf einen Cfx.re-Lizenzschlüssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
   exit 0
 fi
 cat > data/apexium.cfg <<CFG
@@ -251,10 +251,10 @@ mkdir -p "$ROOT"
 
 BASE="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master"
 if [ "$VERSION" = "latest" ]; then
-    SLUG="$(curl -fsSL "$BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | head -n1)"
+    SLUG="$(curl -fsSL "$BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | sed -n '1p')"
     [ -n "$SLUG" ] || { echo "Aktuelles FiveM-Artifact konnte nicht ermittelt werden" >&2; exit 2; }
 else
-    SLUG="${VERSION#artifact:}"; printf '%s' "$SLUG" | grep -Eq '^[0-9]{3,8}-[A-Za-z0-9]{6,80}$' || { echo "Ung ltige FiveM-Artifact-ID" >&2; exit 2; }
+    SLUG="${VERSION#artifact:}"; printf '%s' "$SLUG" | grep -Eq '^[0-9]{3,8}-[A-Za-z0-9]{6,80}$' || { echo "Ungültige FiveM-Artifact-ID" >&2; exit 2; }
 fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 curl -fL "$BASE/$SLUG/fx.tar.xz" -o "$TMP/fx.tar.xz"; tar -xJf "$TMP/fx.tar.xz" -C "$ROOT"
