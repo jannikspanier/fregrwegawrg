@@ -103,7 +103,10 @@ ForwardToConsole=no
 ForwardToWall=no
 EOF
 
-FIVEM_ARTIFACT_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/35245-6efb47dff473c0e2a12fb50b08d74c0eb24a50d5/fx.tar.xz"
+FIVEM_ARTIFACT_BASE="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master"
+FIVEM_ARTIFACT_SLUG="$(curl -fsSL "$FIVEM_ARTIFACT_BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | head -n1)"
+[ -n "$FIVEM_ARTIFACT_SLUG" ] || { echo "Aktuelles FiveM-Artifact konnte nicht ermittelt werden." >&2; exit 1; }
+FIVEM_ARTIFACT_URL="${FIVEM_ARTIFACT_BASE}/${FIVEM_ARTIFACT_SLUG}/fx.tar.xz"
 
 curl -fL "$FIVEM_ARTIFACT_URL" \
   -o /tmp/fx.tar.xz
@@ -130,7 +133,7 @@ cat > /usr/local/bin/apexium-start-game <<'EOF'
 #!/usr/bin/env bash
 cd /opt/gameserver
 if [ -z "${FIVEM_LICENSE_KEY:-}" ]; then
-  echo "FiveM wartet auf einen Cfx.re-Lizenzschlüssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
+  echo "FiveM wartet auf einen Cfx.re-Lizenzschl ssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
   exit 0
 fi
 cat > data/apexium.cfg <<CFG
@@ -178,7 +181,7 @@ EOF
 # Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
 find /opt/gameserver -type f -iname '*.pdb' -delete
 
-apt-get purge -y --autoremove curl xz-utils
+# Update-Abhaengigkeiten bleiben fuer Versionswechsel und Neuinstallationen im Kundencontainer erhalten.
 
 # Nur der SSH-Server und ssh-keygen bleiben; Client-Werkzeuge werden nicht gebraucht.
 rm -f \
@@ -235,6 +238,35 @@ rm -rf /usr/share/perl5/Debconf /usr/share/keyrings
 # Kein interaktiver Login/MOTD in den Kunden-Appliances.
 rm -rf /etc/update-motd.d
 rm -f /etc/motd /etc/issue /etc/issue.net
+cat > /usr/local/bin/apexium-install-version <<'APEXIUM_VERSION_INSTALLER_EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+VERSION="${1:-latest}"
+WIPE="${2:-0}"
+ROOT=/opt/gameserver
+if [ "$WIPE" = "1" ]; then
+    find "$ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+fi
+mkdir -p "$ROOT"
+
+BASE="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master"
+if [ "$VERSION" = "latest" ]; then
+    SLUG="$(curl -fsSL "$BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | head -n1)"
+    [ -n "$SLUG" ] || { echo "Aktuelles FiveM-Artifact konnte nicht ermittelt werden" >&2; exit 2; }
+else
+    SLUG="${VERSION#artifact:}"; printf '%s' "$SLUG" | grep -Eq '^[0-9]{3,8}-[A-Za-z0-9]{6,80}$' || { echo "Ung ltige FiveM-Artifact-ID" >&2; exit 2; }
+fi
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+curl -fL "$BASE/$SLUG/fx.tar.xz" -o "$TMP/fx.tar.xz"; tar -xJf "$TMP/fx.tar.xz" -C "$ROOT"
+if [ "$WIPE" = "1" ] || [ ! -d "$ROOT/resources" ]; then
+    curl -fsSL https://github.com/citizenfx/cfx-server-data/archive/refs/heads/master.tar.gz | tar -xz -C "$TMP"
+    rm -rf "$ROOT/resources"; cp -a "$TMP/cfx-server-data-master/resources" "$ROOT/resources"
+fi
+chmod 0755 "$ROOT/run.sh"; printf '%s\n' "$SLUG" > /etc/apexium-gameserver-version; chown -R gameserver:gameserver "$ROOT"
+APEXIUM_VERSION_INSTALLER_EOF
+chmod 0755 /usr/local/bin/apexium-install-version
+printf '%s\n' 'template' > /etc/apexium-gameserver-version
+
 rm -f /etc/apexium-gameserver.env
 rm -rf /root
 mkdir -m 0700 /root
