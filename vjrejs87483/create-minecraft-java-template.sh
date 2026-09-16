@@ -171,7 +171,7 @@ EOF
 # Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
 find /opt/gameserver -type f -iname '*.pdb' -delete
 
-apt-get purge -y --autoremove curl jq
+# Update-Abhaengigkeiten bleiben fuer Versionswechsel und Neuinstallationen im Kundencontainer erhalten.
 
 # Nur der SSH-Server und ssh-keygen bleiben; Client-Werkzeuge werden nicht gebraucht.
 rm -f \
@@ -228,6 +228,34 @@ rm -rf /usr/share/perl5/Debconf /usr/share/keyrings
 # Kein interaktiver Login/MOTD in den Kunden-Appliances.
 rm -rf /etc/update-motd.d
 rm -f /etc/motd /etc/issue /etc/issue.net
+cat > /usr/local/bin/apexium-install-version <<'APEXIUM_VERSION_INSTALLER_EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+VERSION="${1:-latest}"
+WIPE="${2:-0}"
+ROOT=/opt/gameserver
+if [ "$WIPE" = "1" ]; then
+    find "$ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+fi
+mkdir -p "$ROOT"
+
+MANIFEST_URL="https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
+MANIFEST="$(curl -fsSL "$MANIFEST_URL")"
+if [ "$VERSION" = "latest" ]; then
+    RESOLVED="$(printf '%s' "$MANIFEST" | jq -r '.latest.release')"
+else
+    RESOLVED="$VERSION"
+fi
+VERSION_URL="$(printf '%s' "$MANIFEST" | jq -r --arg v "$RESOLVED" '.versions[] | select(.id == $v) | .url' | head -n1)"
+[ -n "$VERSION_URL" ] && [ "$VERSION_URL" != "null" ] || { echo "Minecraft-Version nicht gefunden: $RESOLVED" >&2; exit 2; }
+SERVER_URL="$(curl -fsSL "$VERSION_URL" | jq -r '.downloads.server.url')"
+curl -fL "$SERVER_URL" -o "$ROOT/server.jar"
+printf '%s\n' "$RESOLVED" > /etc/apexium-gameserver-version
+chown -R gameserver:gameserver "$ROOT"
+APEXIUM_VERSION_INSTALLER_EOF
+chmod 0755 /usr/local/bin/apexium-install-version
+printf '%s\n' 'template' > /etc/apexium-gameserver-version
+
 rm -f /etc/apexium-gameserver.env
 rm -rf /root
 mkdir -m 0700 /root
