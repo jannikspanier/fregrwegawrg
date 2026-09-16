@@ -238,7 +238,7 @@ EOF
 # Debug-Symbole werden fuer den produktiven Gameserver nicht benoetigt.
 find /opt/gameserver -type f -iname '*.pdb' -delete
 
-apt-get purge -y --autoremove curl lib32gcc-s1 lib32stdc++6
+# Update-Abhaengigkeiten bleiben fuer Versionswechsel und Neuinstallationen im Kundencontainer erhalten.
 
 # Nur der SSH-Server und ssh-keygen bleiben; Client-Werkzeuge werden nicht gebraucht.
 rm -f \
@@ -295,6 +295,41 @@ rm -rf /usr/share/perl5/Debconf /usr/share/keyrings
 # Kein interaktiver Login/MOTD in den Kunden-Appliances.
 rm -rf /etc/update-motd.d
 rm -f /etc/motd /etc/issue /etc/issue.net
+cat > /usr/local/bin/apexium-install-version <<'APEXIUM_VERSION_INSTALLER_EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+VERSION="${1:-latest}"
+WIPE="${2:-0}"
+ROOT=/opt/gameserver
+if [ "$WIPE" = "1" ]; then
+    find "$ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+fi
+mkdir -p "$ROOT"
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/steamcmd" "$TMP/home"
+curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$TMP/steamcmd"
+chown -R gameserver:gameserver "$ROOT" "$TMP/steamcmd" "$TMP/home"
+APP_ARGS=( +@sSteamCmdForcePlatformType windows )
+if [ "$VERSION" = "latest" ]; then
+    :
+    runuser -u gameserver -- env HOME="$TMP/home" "$TMP/steamcmd/steamcmd.sh" "${APP_ARGS[@]}" +force_install_dir "$ROOT" +login anonymous +app_update 556450 validate +quit
+elif [[ "$VERSION" == branch:* ]]; then
+    BRANCH="${VERSION#branch:}"; printf '%s' "$BRANCH" | grep -Eq '^[A-Za-z0-9._+-]{1,64}$' || { echo "Ungültiger Steam-Branch" >&2; exit 2; }
+    runuser -u gameserver -- env HOME="$TMP/home" "$TMP/steamcmd/steamcmd.sh" "${APP_ARGS[@]}" +force_install_dir "$ROOT" +login anonymous +app_update 556450 -beta "$BRANCH" validate +quit
+elif [[ "$VERSION" == manifest:*:* ]]; then
+    SPEC="${VERSION#manifest:}"; DEPOT="${SPEC%%:*}"; MANIFEST="${SPEC#*:}"
+    printf '%s' "$DEPOT" | grep -Eq '^[0-9]+$' && printf '%s' "$MANIFEST" | grep -Eq '^[0-9]+$' || { echo "Ungültiger Steam-Manifest-Spec" >&2; exit 2; }
+    runuser -u gameserver -- env HOME="$TMP/home" "$TMP/steamcmd/steamcmd.sh" "${APP_ARGS[@]}" +login anonymous +download_depot 556450 "$DEPOT" "$MANIFEST" +quit
+    CONTENT="$TMP/home/Steam/steamapps/content/app_556450/depot_$DEPOT"; [ -d "$CONTENT" ] || { echo "Steam-Manifest-Inhalt fehlt" >&2; exit 2; }; cp -a "$CONTENT/." "$ROOT/"
+else echo "Ungültige Steam-Version: $VERSION" >&2; exit 2; fi
+mkdir -p "$ROOT/data/wine"; chown -R gameserver:gameserver "$ROOT"; runuser -u gameserver -- env HOME="$ROOT" WINEPREFIX="$ROOT/data/wine" WINEARCH=win64 xvfb-run -a /usr/lib/wine/wine64 wineboot
+printf '%s
+' "$VERSION" > /etc/apexium-gameserver-version; chown -R gameserver:gameserver "$ROOT"
+APEXIUM_VERSION_INSTALLER_EOF
+chmod 0755 /usr/local/bin/apexium-install-version
+printf '%s\n' 'template' > /etc/apexium-gameserver-version
+
 rm -f /etc/apexium-gameserver.env
 rm -rf /root
 mkdir -m 0700 /root
