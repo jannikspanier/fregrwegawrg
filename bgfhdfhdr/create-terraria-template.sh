@@ -297,10 +297,11 @@ if [ "$VERSION" = "latest" ]; then
     CODE="$(printf '%s' "$SERVER_ARCHIVE" | grep -oE '[0-9]+' | head -n1)"
     RESOLVED="$CODE"
 else
-    printf '%s' "$VERSION" | grep -Eq '^[0-9]+([.][0-9]+){2,3}$|^[0-9]{4,6}$' || { echo "Ungültige Terraria-Version" >&2; exit 2; }
+    printf '%s' "$VERSION" | grep -Eq '^[0-9]+([.][0-9]+){2,3}$|^[0-9]{4,6}$' || { echo "UngÃ¼ltige Terraria-Version" >&2; exit 2; }
     CODE="$(printf '%s' "$VERSION" | tr -d '.')"; RESOLVED="$VERSION"
 fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+chmod 0755 "$TMP"
 curl -fL "https://terraria.org/api/download/pc-dedicated-server/terraria-server-${CODE}.zip" -o "$TMP/server.zip"
 unzip -q "$TMP/server.zip" -d "$TMP/server"
 BIN="$(find "$TMP/server" -type f -name TerrariaServer.bin.x86_64 -print -quit)"
