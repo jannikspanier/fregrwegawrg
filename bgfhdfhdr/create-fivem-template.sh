@@ -133,7 +133,7 @@ cat > /usr/local/bin/apexium-start-game <<'EOF'
 #!/usr/bin/env bash
 cd /opt/gameserver
 if [ -z "${FIVEM_LICENSE_KEY:-}" ]; then
-  echo "FiveM wartet auf einen Cfx.re-Lizenzschlüssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
+  echo "FiveM wartet auf einen Cfx.re-LizenzschlÃ¼ssel. Hinterlege ihn im Webinterface unter Spiel-Einstellungen und starte den Server danach neu."
   exit 0
 fi
 cat > data/apexium.cfg <<CFG
@@ -254,9 +254,10 @@ if [ "$VERSION" = "latest" ]; then
     SLUG="$(curl -fsSL "$BASE/" | grep -oE '[0-9]{3,8}-[a-f0-9]{20,}' | sed -n '1p')"
     [ -n "$SLUG" ] || { echo "Aktuelles FiveM-Artifact konnte nicht ermittelt werden" >&2; exit 2; }
 else
-    SLUG="${VERSION#artifact:}"; printf '%s' "$SLUG" | grep -Eq '^[0-9]{3,8}-[A-Za-z0-9]{6,80}$' || { echo "Ungültige FiveM-Artifact-ID" >&2; exit 2; }
+    SLUG="${VERSION#artifact:}"; printf '%s' "$SLUG" | grep -Eq '^[0-9]{3,8}-[A-Za-z0-9]{6,80}$' || { echo "UngÃ¼ltige FiveM-Artifact-ID" >&2; exit 2; }
 fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+chmod 0755 "$TMP"
 curl -fL "$BASE/$SLUG/fx.tar.xz" -o "$TMP/fx.tar.xz"; tar -xJf "$TMP/fx.tar.xz" -C "$ROOT"
 if [ "$WIPE" = "1" ] || [ ! -d "$ROOT/resources" ]; then
     curl -fsSL https://github.com/citizenfx/cfx-server-data/archive/refs/heads/master.tar.gz | tar -xz -C "$TMP"
