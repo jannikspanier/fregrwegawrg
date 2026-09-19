@@ -290,6 +290,7 @@ fi
 mkdir -p "$ROOT"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+chmod 0755 "$TMP"
 mkdir -p "$TMP/steamcmd" "$TMP/home"
 curl -fsSL https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz | tar -xz -C "$TMP/steamcmd"
 chown -R gameserver:gameserver "$ROOT" "$TMP/steamcmd" "$TMP/home"
@@ -298,14 +299,14 @@ if [ "$VERSION" = "latest" ]; then
     :
     runuser -u gameserver -- env HOME="$TMP/home" "$TMP/steamcmd/steamcmd.sh" "${APP_ARGS[@]}" +force_install_dir "$ROOT" +login anonymous +app_update 258550 validate +quit
 elif [[ "$VERSION" == branch:* ]]; then
-    BRANCH="${VERSION#branch:}"; printf '%s' "$BRANCH" | grep -Eq '^[A-Za-z0-9._+-]{1,64}$' || { echo "Ungültiger Steam-Branch" >&2; exit 2; }
+    BRANCH="${VERSION#branch:}"; printf '%s' "$BRANCH" | grep -Eq '^[A-Za-z0-9._+-]{1,64}$' || { echo "UngÃ¼ltiger Steam-Branch" >&2; exit 2; }
     runuser -u gameserver -- env HOME="$TMP/home" "$TMP/steamcmd/steamcmd.sh" "${APP_ARGS[@]}" +force_install_dir "$ROOT" +login anonymous +app_update 258550 -beta "$BRANCH" validate +quit
 elif [[ "$VERSION" == manifest:*:* ]]; then
     SPEC="${VERSION#manifest:}"; DEPOT="${SPEC%%:*}"; MANIFEST="${SPEC#*:}"
-    printf '%s' "$DEPOT" | grep -Eq '^[0-9]+$' && printf '%s' "$MANIFEST" | grep -Eq '^[0-9]+$' || { echo "Ungültiger Steam-Manifest-Spec" >&2; exit 2; }
+    printf '%s' "$DEPOT" | grep -Eq '^[0-9]+$' && printf '%s' "$MANIFEST" | grep -Eq '^[0-9]+$' || { echo "UngÃ¼ltiger Steam-Manifest-Spec" >&2; exit 2; }
     runuser -u gameserver -- env HOME="$TMP/home" "$TMP/steamcmd/steamcmd.sh" "${APP_ARGS[@]}" +login anonymous +download_depot 258550 "$DEPOT" "$MANIFEST" +quit
     CONTENT="$TMP/home/Steam/steamapps/content/app_258550/depot_$DEPOT"; [ -d "$CONTENT" ] || { echo "Steam-Manifest-Inhalt fehlt" >&2; exit 2; }; cp -a "$CONTENT/." "$ROOT/"
-else echo "Ungültige Steam-Version: $VERSION" >&2; exit 2; fi
+else echo "UngÃ¼ltige Steam-Version: $VERSION" >&2; exit 2; fi
 mkdir -p "$ROOT/.steam/sdk64"; cp "$TMP/steamcmd/linux64/steamclient.so" "$ROOT/.steam/sdk64/steamclient.so"
 printf '%s
 ' "$VERSION" > /etc/apexium-gameserver-version; chown -R gameserver:gameserver "$ROOT"
