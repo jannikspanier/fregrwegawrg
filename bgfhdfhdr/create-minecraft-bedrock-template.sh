@@ -221,11 +221,12 @@ if [ "$VERSION" = "latest" ]; then
     URL="$(curl -4 -fsSL -A 'Mozilla/5.0' 'https://net-secondary.web.minecraft-services.net/api/v1.0/download/links' | grep -o '{[^{}]*"serverBedrockLinux"[^{}]*}' | sed -E 's/.*"downloadUrl":"([^"]+)".*/\1/')"
     RESOLVED="$(basename "$URL" .zip | sed 's/^bedrock-server-//')"
 else
-    printf '%s' "$VERSION" | grep -Eq '^[0-9]+([.][0-9]+){2,4}$' || { echo "Ungültige Bedrock-Version" >&2; exit 2; }
+    printf '%s' "$VERSION" | grep -Eq '^[0-9]+([.][0-9]+){2,4}$' || { echo "UngÃ¼ltige Bedrock-Version" >&2; exit 2; }
     RESOLVED="$VERSION"
     URL="https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock-server-${RESOLVED}.zip"
 fi
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+chmod 0755 "$TMP"
 curl -4 -fL -A 'Mozilla/5.0' -o "$TMP/server.zip" "$URL"
 unzip -oq "$TMP/server.zip" -d "$ROOT"
 chmod 0755 "$ROOT/bedrock_server"
