@@ -44,9 +44,10 @@ mkdir -p /usr/share/man/man1
 apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
+  git \
   jq \
   openssh-server \
-  openjdk-25-jre-headless
+  openjdk-25-jdk-headless
 
 useradd \
   --system \
@@ -234,23 +235,135 @@ set -Eeuo pipefail
 VERSION="${1:-latest}"
 WIPE="${2:-0}"
 ROOT=/opt/gameserver
+USER_AGENT='Apexium-Hosting/1.0 (https://apexium.cloud)'
 if [ "$WIPE" = "1" ]; then
     find "$ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 fi
 mkdir -p "$ROOT"
 
-MANIFEST_URL="https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
-MANIFEST="$(curl -fsSL "$MANIFEST_URL")"
-if [ "$VERSION" = "latest" ]; then
-    RESOLVED="$(printf '%s' "$MANIFEST" | jq -r '.latest.release')"
-else
-    RESOLVED="$VERSION"
-fi
-VERSION_URL="$(printf '%s' "$MANIFEST" | jq -r --arg v "$RESOLVED" '.versions[] | select(.id == $v) | .url' | head -n1)"
-[ -n "$VERSION_URL" ] && [ "$VERSION_URL" != "null" ] || { echo "Minecraft-Version nicht gefunden: $RESOLVED" >&2; exit 2; }
-SERVER_URL="$(curl -fsSL "$VERSION_URL" | jq -r '.downloads.server.url')"
-curl -fL "$SERVER_URL" -o "$ROOT/server.jar"
-printf '%s\n' "$RESOLVED" > /etc/apexium-gameserver-version
+fetch_mojang_manifest() {
+    curl -fsSL 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
+}
+
+install_vanilla() {
+    local requested="$1" manifest resolved version_url server_url
+    manifest="$(fetch_mojang_manifest)"
+    if [ "$requested" = "latest" ]; then
+        resolved="$(printf '%s' "$manifest" | jq -r '.latest.release')"
+    else
+        resolved="$requested"
+    fi
+    version_url="$(printf '%s' "$manifest" | jq -r --arg v "$resolved" '.versions[] | select(.id == $v) | .url' | sed -n '1p')"
+    [ -n "$version_url" ] && [ "$version_url" != "null" ] || { echo "Minecraft-Version nicht gefunden: $resolved" >&2; exit 2; }
+    server_url="$(curl -fsSL "$version_url" | jq -r '.downloads.server.url // empty')"
+    [ -n "$server_url" ] || { echo "Für Minecraft $resolved ist kein offizielles Server-JAR verfügbar" >&2; exit 2; }
+    curl -fL "$server_url" -o "$ROOT/server.jar"
+    RESOLVED_VERSION="$resolved"
+}
+
+install_papermc_project() {
+    local project="$1" requested="$2" payload resolved builds url
+    payload="$(curl -fsSL -H "User-Agent: $USER_AGENT" "https://fill.papermc.io/v3/projects/$project")"
+    if [ "$requested" = "latest" ]; then
+        resolved="$(printf '%s' "$payload" | jq -r '.versions | to_entries[0].value[0] // empty')"
+    else
+        resolved="$requested"
+    fi
+    [ -n "$resolved" ] || { echo "Keine $project-Version gefunden" >&2; exit 2; }
+    builds="$(curl -fsSL -H "User-Agent: $USER_AGENT" "https://fill.papermc.io/v3/projects/$project/versions/$resolved/builds")"
+    url="$(printf '%s' "$builds" | jq -r '(first(.[] | select(.channel == "STABLE") | .downloads."server:default".url) // first(.[].downloads."server:default".url) // empty)')"
+    [ -n "$url" ] || { echo "Kein stabiler $project-Build für Minecraft $resolved verfügbar" >&2; exit 2; }
+    curl -fL -H "User-Agent: $USER_AGENT" "$url" -o "$ROOT/server.jar"
+    RESOLVED_VERSION="$project:$resolved"
+}
+
+install_purpur() {
+    local requested="$1" payload resolved
+    payload="$(curl -fsSL 'https://api.purpurmc.org/v2/purpur')"
+    if [ "$requested" = "latest" ]; then
+        resolved="$(printf '%s' "$payload" | jq -r '.versions[-1] // empty')"
+    else
+        resolved="$requested"
+    fi
+    [ -n "$resolved" ] || { echo "Keine Purpur-Version gefunden" >&2; exit 2; }
+    curl -fL "https://api.purpurmc.org/v2/purpur/$resolved/latest/download" -o "$ROOT/server.jar"
+    RESOLVED_VERSION="purpur:$resolved"
+}
+
+install_fabric() {
+    local requested="$1" resolved loader installer
+    if [ "$requested" = "latest" ]; then
+        resolved="$(curl -fsSL 'https://meta.fabricmc.net/v2/versions/game' | jq -r 'first(.[] | select(.stable == true)).version // empty')"
+    else
+        resolved="$requested"
+    fi
+    [ -n "$resolved" ] || { echo "Keine Fabric-kompatible Minecraft-Version gefunden" >&2; exit 2; }
+    loader="$(curl -fsSL "https://meta.fabricmc.net/v2/versions/loader/$resolved" | jq -r 'first(.[] | select(.loader.stable == true)).loader.version // .[0].loader.version // empty')"
+    installer="$(curl -fsSL 'https://meta.fabricmc.net/v2/versions/installer' | jq -r 'first(.[] | select(.stable == true)).version // .[0].version // empty')"
+    [ -n "$loader" ] && [ -n "$installer" ] || { echo "Kein Fabric Loader/Installer für Minecraft $resolved verfügbar" >&2; exit 2; }
+    curl -fL "https://meta.fabricmc.net/v2/versions/loader/$resolved/$loader/$installer/server/jar" -o "$ROOT/server.jar"
+    RESOLVED_VERSION="fabric:$resolved"
+}
+
+install_buildtools() {
+    local software="$1" requested="$2" target tmp jar resolved
+    target="$requested"
+    [ "$target" = "latest" ] || printf '%s' "$target" | grep -Eq '^[0-9]+([.][0-9]+){1,3}$' || { echo "Ungültige BuildTools-Version" >&2; exit 2; }
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' RETURN
+    chmod 0755 "$tmp"
+    mkdir -p "$tmp/build" "$tmp/home"
+    chown -R gameserver:gameserver "$tmp/build" "$tmp/home"
+    curl -fL 'https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar' -o "$tmp/BuildTools.jar"
+    chown gameserver:gameserver "$tmp/BuildTools.jar"
+    runuser -u gameserver -- env HOME="$tmp/home" sh -c 'cd "$1" && exec java -jar "$2" --rev "$3"' sh "$tmp/build" "$tmp/BuildTools.jar" "$target"
+    jar="$(find "$tmp/build" -maxdepth 1 -type f -name "${software}-*.jar" -print | sort -V | tail -n1)"
+    [ -n "$jar" ] || { echo "BuildTools hat kein ${software}-Server-JAR erzeugt" >&2; exit 2; }
+    cp "$jar" "$ROOT/server.jar"
+    if [ "$target" = "latest" ]; then
+        resolved="$(basename "$jar" .jar | sed -E "s/^${software}-//; s/-R.*$//")"
+    else
+        resolved="$target"
+    fi
+    [ -n "$resolved" ] || resolved="$target"
+    RESOLVED_VERSION="$software:$resolved"
+    rm -rf "$tmp"
+    trap - RETURN
+}
+
+case "$VERSION" in
+    latest)
+        install_vanilla latest
+        ;;
+    vanilla:*)
+        install_vanilla "${VERSION#vanilla:}"
+        ;;
+    paper:*)
+        install_papermc_project paper "${VERSION#paper:}"
+        ;;
+    folia:*)
+        install_papermc_project folia "${VERSION#folia:}"
+        ;;
+    purpur:*)
+        install_purpur "${VERSION#purpur:}"
+        ;;
+    fabric:*)
+        install_fabric "${VERSION#fabric:}"
+        ;;
+    spigot:*)
+        install_buildtools spigot "${VERSION#spigot:}"
+        ;;
+    craftbukkit:*)
+        install_buildtools craftbukkit "${VERSION#craftbukkit:}"
+        ;;
+    *)
+        # Backwards compatibility: existing Apexium orders stored Vanilla as a
+        # plain Minecraft version such as 1.21.4.
+        install_vanilla "$VERSION"
+        ;;
+esac
+
+printf '%s\n' "$RESOLVED_VERSION" > /etc/apexium-gameserver-version
 chown -R gameserver:gameserver "$ROOT"
 APEXIUM_VERSION_INSTALLER_EOF
 chmod 0755 /usr/local/bin/apexium-install-version
