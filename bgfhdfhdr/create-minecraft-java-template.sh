@@ -44,8 +44,10 @@ mkdir -p /usr/share/man/man1
 apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
+  fontconfig \
   git \
   jq \
+  libfreetype6 \
   openssh-server \
   openjdk-25-jdk-headless
 
@@ -144,7 +146,12 @@ set_property max-players "$MAX_PLAYERS"
 set_property motd "$SERVER_NAME"
 F=/run/apexium-gameserver/console
 rm -f "$F"; mkfifo -m 600 "$F"; exec 3<>"$F"
-exec java -Xms512M -Xmx"$(( $MEMORY_MB - 512 ))M" -jar server.jar nogui <&3
+JAVA_BIN="$(cat /etc/apexium-minecraft-java-bin 2>/dev/null || true)"
+if [ -z "$JAVA_BIN" ] || [ ! -x "$JAVA_BIN" ]; then
+  JAVA_BIN="$(command -v java || true)"
+fi
+[ -n "$JAVA_BIN" ] && [ -x "$JAVA_BIN" ] || { echo "Keine kompatible Java-Laufzeit installiert" >&2; exit 1; }
+exec "$JAVA_BIN" -Xms512M -Xmx"$(( $MEMORY_MB - 512 ))M" -jar server.jar nogui <&3
 EOF
 
 chmod 0755 \
@@ -241,6 +248,72 @@ if [ "$WIPE" = "1" ]; then
 fi
 mkdir -p "$ROOT"
 
+version_ge() {
+    local left="$1" right="$2"
+    [ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n1)" = "$left" ]
+}
+
+java_major_for_minecraft() {
+    local version="$1"
+    if [[ "$version" =~ ^([2-9][6-9]|[3-9][0-9])([.]|$) ]]; then echo 25
+    elif version_ge "$version" '1.20.5'; then echo 21
+    elif version_ge "$version" '1.18'; then echo 17
+    elif version_ge "$version" '1.17'; then echo 16
+    else echo 8
+    fi
+}
+
+java_major_for_paper() {
+    local version="$1"
+    if [[ "$version" =~ ^([2-9][6-9]|[3-9][0-9])([.]|$) ]]; then echo 25
+    elif version_ge "$version" '1.20'; then echo 21
+    elif version_ge "$version" '1.17'; then echo 17
+    elif [ "$version" = '1.16.5' ]; then echo 16
+    elif version_ge "$version" '1.12'; then echo 11
+    else echo 8
+    fi
+}
+
+java_major_for_fabric() {
+    local version="$1"
+    if [[ "$version" =~ ^([2-9][6-9]|[3-9][0-9])([.]|$) ]]; then echo 25
+    elif version_ge "$version" '1.20.5'; then echo 21
+    elif version_ge "$version" '1.18'; then echo 17
+    elif version_ge "$version" '1.17'; then echo 16
+    else echo 8
+    fi
+}
+
+ensure_java() {
+    local major="$1" java_root="/opt/apexium-java/jdk-${major}" tmp
+    if [ ! -x "$java_root/bin/java" ]; then
+        tmp="$(mktemp -d)"
+        curl -fL --retry 3 --retry-delay 2 -A "$USER_AGENT" \
+          "https://api.adoptium.net/v3/binary/latest/${major}/ga/linux/x64/jdk/hotspot/normal/eclipse" \
+          -o "$tmp/java.tar.gz"
+        rm -rf "$java_root"
+        mkdir -p "$java_root"
+        tar -xzf "$tmp/java.tar.gz" -C "$java_root" --strip-components=1
+        rm -rf "$tmp"
+    fi
+    [ -x "$java_root/bin/java" ] || { echo "Java ${major} konnte nicht installiert werden" >&2; exit 2; }
+    mkdir -p /opt/apexium-java
+    find /opt/apexium-java -mindepth 1 -maxdepth 1 -type d ! -name "jdk-${major}" -exec rm -rf -- {} +
+    JAVA_HOME_SELECTED="$java_root"
+    JAVA_BIN_SELECTED="$java_root/bin/java"
+    printf '%s\n' "$JAVA_BIN_SELECTED" > /etc/apexium-minecraft-java-bin
+}
+
+select_runtime_java() {
+    local software="$1" version="$2" major
+    case "$software" in
+        paper|purpur|folia) major="$(java_major_for_paper "$version")" ;;
+        fabric) major="$(java_major_for_fabric "$version")" ;;
+        *) major="$(java_major_for_minecraft "$version")" ;;
+    esac
+    ensure_java "$major"
+}
+
 fetch_mojang_manifest() {
     curl -fsSL 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
 }
@@ -257,6 +330,7 @@ install_vanilla() {
     [ -n "$version_url" ] && [ "$version_url" != "null" ] || { echo "Minecraft-Version nicht gefunden: $resolved" >&2; exit 2; }
     server_url="$(curl -fsSL "$version_url" | jq -r '.downloads.server.url // empty')"
     [ -n "$server_url" ] || { echo "Für Minecraft $resolved ist kein offizielles Server-JAR verfügbar" >&2; exit 2; }
+    select_runtime_java vanilla "$resolved"
     curl -fL "$server_url" -o "$ROOT/server.jar"
     RESOLVED_VERSION="$resolved"
 }
@@ -286,6 +360,7 @@ install_purpur() {
         resolved="$requested"
     fi
     [ -n "$resolved" ] || { echo "Keine Purpur-Version gefunden" >&2; exit 2; }
+    select_runtime_java purpur "$resolved"
     curl -fL "https://api.purpurmc.org/v2/purpur/$resolved/latest/download" -o "$ROOT/server.jar"
     RESOLVED_VERSION="purpur:$resolved"
 }
@@ -306,9 +381,35 @@ install_fabric() {
 }
 
 install_buildtools() {
-    local software="$1" requested="$2" target tmp jar resolved
+    local software="$1" requested="$2" target tmp jar resolved metadata min_class max_class major class_version
     target="$requested"
-    [ "$target" = "latest" ] || printf '%s' "$target" | grep -Eq '^[0-9]+([.][0-9]+){1,3}$' || { echo "Ungültige BuildTools-Version" >&2; exit 2; }
+    if [ "$target" = "latest" ]; then
+        target="$(curl -fsSL 'https://hub.spigotmc.org/versions/' \
+          | grep -oE '[0-9]+([.][0-9]+){1,3}[.]json' \
+          | sed 's/[.]json$//' \
+          | sort -V \
+          | tail -n1)"
+    fi
+    printf '%s' "$target" | grep -Eq '^[0-9]+([.][0-9]+){1,3}$' || { echo "UngÃ¼ltige BuildTools-Version" >&2; exit 2; }
+
+    # Spigot publishes the accepted Java class-file versions for each Minecraft
+    # revision. Select the newest JDK we ship that is inside that exact range.
+    metadata="$(curl -fsSL "https://hub.spigotmc.org/versions/${target}.json")"
+    min_class="$(printf '%s' "$metadata" | jq -r '(.javaVersions // []) | min // empty')"
+    max_class="$(printf '%s' "$metadata" | jq -r '(.javaVersions // []) | max // empty')"
+    major=""
+    if [[ "$min_class" =~ ^[0-9]+$ ]] && [[ "$max_class" =~ ^[0-9]+$ ]]; then
+        for candidate in 26 25 21 17 16 11 8; do
+            class_version=$((candidate + 44))
+            if [ "$class_version" -ge "$min_class" ] && [ "$class_version" -le "$max_class" ]; then
+                major="$candidate"
+                break
+            fi
+        done
+    fi
+    [ -n "$major" ] || major="$(java_major_for_minecraft "$target")"
+    ensure_java "$major"
+
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' RETURN
     chmod 0755 "$tmp"
@@ -316,16 +417,25 @@ install_buildtools() {
     chown -R gameserver:gameserver "$tmp/build" "$tmp/home"
     curl -fL 'https://hub.spigotmc.org/jenkins/job/BuildTools/lastSuccessfulBuild/artifact/target/BuildTools.jar' -o "$tmp/BuildTools.jar"
     chown gameserver:gameserver "$tmp/BuildTools.jar"
-    runuser -u gameserver -- env HOME="$tmp/home" sh -c 'cd "$1" && exec java -jar "$2" --rev "$3"' sh "$tmp/build" "$tmp/BuildTools.jar" "$target"
+    runuser -u gameserver -- env \
+      HOME="$tmp/home" \
+      SHELL=/bin/bash \
+      JAVA_HOME="$JAVA_HOME_SELECTED" \
+      PATH="$JAVA_HOME_SELECTED/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      JAVA_TOOL_OPTIONS='-Djava.awt.headless=true -Xms128M -Xmx2048M' \
+      git -C "$tmp/build" config --global --unset core.autocrlf 2>/dev/null || true
+    runuser -u gameserver -- env \
+      HOME="$tmp/home" \
+      SHELL=/bin/bash \
+      JAVA_HOME="$JAVA_HOME_SELECTED" \
+      PATH="$JAVA_HOME_SELECTED/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+      JAVA_TOOL_OPTIONS='-Djava.awt.headless=true -Xms128M -Xmx2048M' \
+      bash -c 'cd "$1" && exec "$2/bin/java" -jar "$3" --rev "$4"' \
+      bash "$tmp/build" "$JAVA_HOME_SELECTED" "$tmp/BuildTools.jar" "$target"
     jar="$(find "$tmp/build" -maxdepth 1 -type f -name "${software}-*.jar" -print | sort -V | tail -n1)"
     [ -n "$jar" ] || { echo "BuildTools hat kein ${software}-Server-JAR erzeugt" >&2; exit 2; }
     cp "$jar" "$ROOT/server.jar"
-    if [ "$target" = "latest" ]; then
-        resolved="$(basename "$jar" .jar | sed -E "s/^${software}-//; s/-R.*$//")"
-    else
-        resolved="$target"
-    fi
-    [ -n "$resolved" ] || resolved="$target"
+    resolved="$target"
     RESOLVED_VERSION="$software:$resolved"
     rm -rf "$tmp"
     trap - RETURN
