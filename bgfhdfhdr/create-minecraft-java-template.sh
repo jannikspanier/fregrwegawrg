@@ -292,10 +292,19 @@ ensure_java() {
           "https://api.adoptium.net/v3/binary/latest/${major}/ga/linux/x64/jdk/hotspot/normal/eclipse" \
           -o "$tmp/java.tar.gz"
         rm -rf "$java_root"
-        mkdir -p "$java_root"
+        # pct exec / der Agent kann mit einer restriktiven umask (z. B. 0077)
+        # laufen. Explizite Modi sind deshalb wichtig, weil BuildTools spaeter
+        # als unprivilegierter Benutzer `gameserver` auf dieses JDK zugreift.
+        install -d -m 0755 /opt/apexium-java "$java_root"
         tar -xzf "$tmp/java.tar.gz" -C "$java_root" --strip-components=1
+        chown -R root:root "$java_root"
+        chmod 0755 /opt/apexium-java "$java_root"
+        chmod -R a+rX "$java_root"
         rm -rf "$tmp"
     fi
+    # Auch bereits heruntergeladene JDKs aus einem frueheren Versuch reparieren.
+    chmod 0755 /opt/apexium-java "$java_root" 2>/dev/null || true
+    chmod -R a+rX "$java_root" 2>/dev/null || true
     [ -x "$java_root/bin/java" ] || { echo "Java ${major} konnte nicht installiert werden" >&2; exit 2; }
     mkdir -p /opt/apexium-java
     find /opt/apexium-java -mindepth 1 -maxdepth 1 -type d ! -name "jdk-${major}" -exec rm -rf -- {} +
@@ -347,6 +356,7 @@ install_papermc_project() {
     builds="$(curl -fsSL -H "User-Agent: $USER_AGENT" "https://fill.papermc.io/v3/projects/$project/versions/$resolved/builds")"
     url="$(printf '%s' "$builds" | jq -r '(first(.[] | select(.channel == "STABLE") | .downloads."server:default".url) // first(.[].downloads."server:default".url) // empty)')"
     [ -n "$url" ] || { echo "Kein stabiler $project-Build für Minecraft $resolved verfügbar" >&2; exit 2; }
+    select_runtime_java "$project" "$resolved"
     curl -fL -H "User-Agent: $USER_AGENT" "$url" -o "$ROOT/server.jar"
     RESOLVED_VERSION="$project:$resolved"
 }
@@ -376,6 +386,7 @@ install_fabric() {
     loader="$(curl -fsSL "https://meta.fabricmc.net/v2/versions/loader/$resolved" | jq -r 'first(.[] | select(.loader.stable == true)).loader.version // .[0].loader.version // empty')"
     installer="$(curl -fsSL 'https://meta.fabricmc.net/v2/versions/installer' | jq -r 'first(.[] | select(.stable == true)).version // .[0].version // empty')"
     [ -n "$loader" ] && [ -n "$installer" ] || { echo "Kein Fabric Loader/Installer für Minecraft $resolved verfügbar" >&2; exit 2; }
+    select_runtime_java fabric "$resolved"
     curl -fL "https://meta.fabricmc.net/v2/versions/loader/$resolved/$loader/$installer/server/jar" -o "$ROOT/server.jar"
     RESOLVED_VERSION="fabric:$resolved"
 }
